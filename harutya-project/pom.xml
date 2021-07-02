@@ -14,7 +14,7 @@
     <version>1.0.0</version>
     <modules>
         <module>harutya-nasb</module>
-        <module>harutya-dota2omg</module>
+        <module>harutya-dota2-omg</module>
     </modules>
 
     <properties>
@@ -27,13 +27,17 @@
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
+            <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.harutya</groupId>
+            <artifactId>harutya-framework</artifactId>
+            <version>1.0.0</version>
         </dependency>
     </dependencies>
 
