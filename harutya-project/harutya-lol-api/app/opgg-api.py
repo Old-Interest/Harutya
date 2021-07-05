@@ -21,20 +21,46 @@ class Info:
 
 
 class Hero:
-    def __init__(self, summoner_skill=None, skill=None, equipment=None, rune=None):
-        self.summoner_skill = summoner_skill
-        self.skill = skill
+    def __init__(self, summoner_skills=None, skills=None, equipment=None, rune=None):
+        self.summoner_skills = summoner_skills
+        self.skills = skills
         self.equipment = equipment
         self.rune = rune
+
+
+class Skill:
+    def __init__(self, name1=None, name2=None, up_rate=None, win_rate=None, skills=None):
+        self.name1 = name1
+        self.name2 = name2
+        self.up_rate = up_rate
+        self.win_rate = win_rate
+        self.skills = skills
+
+
+class Equipment:
+    def __init__(self, equipment=None, up_rate=None, win_rate=None):
+        self.equipment = equipment
+        self.up_rate = up_rate
+        self.win_rate = win_rate
 
 
 def web_url_get():
     url = 'http://www.op.gg'
     endpoint = '/champion/statistics'
+
     response = requests.get(url + endpoint, headers=headers)
     soup = bs4.BeautifulSoup(response.text, 'html.parser')
     # 获取到英雄列表
     champion_lists = soup.find('div', class_='champion-index__champion-list')
+    pattern = re.compile('"tabItem champion-trend-tier-.*?"')
+    positions = re.findall(pattern, str(soup.contents))
+    for position in positions:
+        position = str(position).replace('"','')
+        champion_tier = soup.find('tbody', class_=position)
+        tiers = bs4.BeautifulSoup(champion_tier.contents, 'html.parser')
+        heroes = tiers.find('div', _class='"champion-index-table__name')
+        pattern = re.compile('icon-champtier-.1?.png')
+        tier = re.findall(pattern, str(champion_tier))
 
     # 单个英雄div格式匹配
     pattern1 = re.compile('(<div class="champion-index__champion-item .*?</div>)')
@@ -49,13 +75,31 @@ def web_url_get():
     return web_champion
 
 
-def get_hero(champion_name, web_champion):
+def get_hero(champion_name, web_champion) -> []:
     # 对应英雄查询具体信息
-    response = requests.get(web_champion[champion_name], headers=headers)
+    champion_main, champion_text = getbody(web_champion[champion_name])
+    hero = Hero()
+    # 获取召唤师技能
+    get_summoner_skills(hero=hero, champion_main=champion_main)
+    # 技能加点
+    get_skills(hero=hero, champion_main=champion_main)
+    # 获取装备信息
+    get_equipments(hero=hero, champion_text=champion_text)
+    # 获取符文信息
+    get_runes(hero=hero, champion_text=champion_text)
+    return None
+
+
+def getbody(body):
+    response = requests.get(body, headers=headers)
     soup = bs4.BeautifulSoup(response.text, 'html.parser')
     champion_main = soup.find('div', class_="l-champion-statistics-content__main")
     champion_text = champion_main.table
 
+    return champion_main, champion_text
+
+
+def get_summoner_skills(hero, champion_main):
     # 获取召唤师技能和技能加点
     # 得到第一个tbody也就是包含召唤师技能和加点
     skill_tbody = champion_main.table.tbody
@@ -78,33 +122,30 @@ def get_hero(champion_name, web_champion):
     for rate in rate_ls:
         skill_rate.append(rate)
     # skill_rate为登场率胜率
-    content = ''
-    skill = '召唤师技能'.ljust(20) + '登场率'.ljust(10) + '胜率'.ljust(10) + '\n'
-    content += skill
+    skills = []
     for i in range(0, len(skill_name), 2):
-        skill = (skill_name[i] + ' + ' + skill_name[i + 1]).ljust(20) + skill_rate[i].ljust(10) + skill_rate[
-            i + 1].ljust(10) + '\n'
-        content += skill
+        skill = Skill(name1=skill_name[i], name2=skill_name[i + 1], up_rate=skill_rate[i], win_rate=skill_rate[i + 1])
+        skills.append(skill)
+    hero.summoner_skills = skills
 
+
+def get_skills(hero, champion_main):
+    skill_tbody = champion_main.table.tbody
     # 获取技能加点
     skill_adds = skill_tbody.find_next_siblings('tbody')
     pattern4 = re.compile(r'<td>([\s,\S]*?)</td>')
-    skill_add = re.findall(pattern4, str(skill_adds))
-    skill_add = ''.join(skill_add)
+    skills = re.findall(pattern4, str(skill_adds))
+    skills = ''.join(skills)
     pattern5 = re.compile('(\w*?)')
-    skill_add = re.findall(pattern5, skill_add)
-    skill_add = ''.join(skill_add)
-    skill_master = [skill_add[3], skill_add[10]]
-    # skill_master为主技能，副技能
-    # 1 2 3 4 5 6 7 8 10 11 12 14 15
+    skills = re.findall(pattern5, skills)
+    skills = ''.join(skills)
+    hero.skills = skills
 
-    skill = '\n\n' + '主技能'.ljust(15) + '副技能'.ljust(15) + '\n'
-    content += skill
-    skill = skill_master[0].ljust(15) + skill_master[1].ljust(15) + '\n'
-    content += skill
-    # 获取装备信息
+
+def get_equipments(hero, champion_text):
     equipment_tbody = champion_text.find_next_siblings('table')[0].tbody
-    equipment = []
+    equipment_infos = []
+    equipments = []
     pattern6 = re.compile(r'(<tr[\s,\S]*?</tr>)')
     equipment_text = re.findall(pattern6, str(equipment_tbody))
     for text in equipment_text:
@@ -124,23 +165,18 @@ def get_hero(champion_name, web_champion):
         # 获取登场率和胜率
         pattern7 = re.compile(r'<strong>(.*?)</strong>')
         tmp.append(re.findall(pattern7, text))
-        equipment.append(tmp)
+        equipment_infos.append(tmp)
 
-    equip_name = '装备'.ljust(50) + '登场率'.ljust(10) + '胜率'.ljust(10) + '\n'
-    content += '\n\n' + equip_name
-    o = 0
-    # equipment格式为:[[[装备],[登场率，胜率]]]
-    for equip in equipment:
-        equip_name = ''
-        equip_rate = ''
-        for i in equip[0]:
-            equip_name += i.ljust(10)
-        for j in equip[1]:
-            equip_rate += j.ljust(10)
-        content += equip_name.ljust(50) + equip_rate + '\n'
-        o += 1
+        for equip in equipment_infos:
+            equipment = Equipment()
+            equipment.equipment = equip[0]
+            equipment.up_rate = equip[1][0]
+            equipment.win_rate = equip[1][1]
+            equipments.append(equipment)
+        hero.equipment = equipments
 
-    # 获取符文信息
+
+def get_runes(hero, champion_text):
     runes_tbody = champion_text.find_next_siblings('div')[0].tbody
     runes_tag = runes_tbody.tr.td.div
     runes_div = runes_tag.div.find_next_siblings('div')
@@ -167,14 +203,10 @@ def get_hero(champion_name, web_champion):
     # rune_ls格式为[[[符文名],[登场率],[胜率]]]
 
     rune_name = '\n\n' + '符文'.ljust(35) + '登场率'.ljust(10) + '胜率'.ljust(10) + '\n'
-    content += rune_name
     o = 0
     for rune in rune_ls:
         for j, k in zip(rune[1], rune[2]):
             rune_name = rune[0].ljust(30) + j.ljust(10) + k.ljust(10) + '\n'
-            content += rune_name
-        o += 1
-    return content
 
 
 if __name__ == '__main__':
