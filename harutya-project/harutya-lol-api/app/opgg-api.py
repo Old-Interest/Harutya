@@ -2,22 +2,35 @@ __author__ = 'Harutya'
 __date__ = '2021/07/02'
 
 import re
+import threading
+import time
+
 import requests
 import bs4
+from utils import logger
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400",
     "Accept-Language": "zh-CN,zh;q=0.9"
 }
 item = {}
+url = 'http://www.op.gg'
+endpoint = '/champion/statistics'
 
 
 class Info:
-    def __init__(self, heroes=None):
+    def __init__(self, heroes=None, tiers=None, date=None):
         if heroes is None:
             heroes = {}
-        self.data = __date__
+        self.date = date
         self.hero = heroes
+        self.tiers = tiers
+
+
+class Tier:
+    def __init__(self, position=None, rank=None):
+        self.position = position
+        self.rank = rank
 
 
 class Hero:
@@ -44,28 +57,27 @@ class Equipment:
         self.win_rate = win_rate
 
 
-def web_url_get():
-    url = 'http://www.op.gg'
-    endpoint = '/champion/statistics'
+def op_gg_api():
+    info = Info()
+    info.tiers = get_tiers()
+    info.date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    # info.hero = get_all_heroes()
+    return info
 
+
+def get_op_gg():
     response = requests.get(url + endpoint, headers=headers)
     soup = bs4.BeautifulSoup(response.text, 'html.parser')
+    return soup
+
+
+def get_hero_url():
+    soup = get_op_gg()
     # 获取到英雄列表
     champion_lists = soup.find('div', class_='champion-index__champion-list')
-    pattern = re.compile('"tabItem champion-trend-tier-.*?"')
-    positions = re.findall(pattern, str(soup.contents))
-    for position in positions:
-        position = str(position).replace('"','')
-        champion_tier = soup.find('tbody', class_=position)
-        tiers = bs4.BeautifulSoup(champion_tier.contents, 'html.parser')
-        heroes = tiers.find('div', _class='"champion-index-table__name')
-        pattern = re.compile('icon-champtier-.1?.png')
-        tier = re.findall(pattern, str(champion_tier))
-
     # 单个英雄div格式匹配
     pattern1 = re.compile('(<div class="champion-index__champion-item .*?</div>)')
     champion_list = re.findall(pattern1, str(champion_lists))
-
     # 将英雄名和网址作为一个字典
     web_champion = {}
     for champion in champion_list:
@@ -75,9 +87,24 @@ def web_url_get():
     return web_champion
 
 
-def get_hero(champion_name, web_champion) -> []:
+def get_all_heroes():
+    heroes = []
+    threads = []
+    hero_urls = get_hero_url()
+    for key in hero_urls.keys():
+        threads.append(threading.Thread(target=get_hero, kwargs={"hero_url": hero_urls[key]}))
+    for t in threads:
+        t.setDaemon(True)
+        t.start()
+    for t in threads:
+        t.join()
+    return heroes
+
+
+def get_hero(hero_url) -> []:
+    logger.Logger().get_log().info(hero_url)
     # 对应英雄查询具体信息
-    champion_main, champion_text = getbody(web_champion[champion_name])
+    champion_main, champion_text = getbody(hero_url)
     hero = Hero()
     # 获取召唤师技能
     get_summoner_skills(hero=hero, champion_main=champion_main)
@@ -209,5 +236,25 @@ def get_runes(hero, champion_text):
             rune_name = rune[0].ljust(30) + j.ljust(10) + k.ljust(10) + '\n'
 
 
+def get_tiers():
+    tiers = []
+    soup = get_op_gg()
+    pattern1 = re.compile('"tabItem champion-trend-tier-.*?"')
+    positions = re.findall(pattern1, str(soup.contents))
+    for position in positions:
+        position = str(position).replace('"', '')
+        champion_tier = soup.find('tbody', class_=position)
+        pattern2 = re.compile('<div class="champion-index-table__name">.*?</div>')
+        heroes = re.findall(pattern2, str(champion_tier))
+        pattern3 = re.compile('icon-champtier-.1?.png')
+        rank = re.findall(pattern3, str(champion_tier))
+        tier = Tier()
+        for i in range(0, len(heroes), 1):
+            tier.rank = [heroes[i], rank[i]]
+            tier.position = position.replace("tabItem champion-trend-tier-", "")
+            tiers.append(tier)
+    return tiers
+
+
 if __name__ == '__main__':
-    get_hero("zac", web_url_get())
+    op_gg_api()
