@@ -9,8 +9,6 @@ import time
 import requests
 import bs4
 
-from app.utils import logger
-
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400",
     "Accept-Language": "zh-CN,zh;q=0.9"
@@ -18,8 +16,7 @@ headers = {
 item = {}
 url = 'http://www.op.gg'
 endpoint = '/champion/statistics'
-
-a = 0
+tip_list = {re.compile('Attack Speed'), re.compile('Adaptive Force'), re.compile('Magic Resist'), re.compile('Armor'), re.compile('Ability Haste'), re.compile('Health')}
 
 
 class Info:
@@ -62,11 +59,13 @@ class Equipment:
 
 
 class Rune:
-    def __init__(self, name=None, up_rate=None, win_rate=None, runes=None):
+    def __init__(self, name=None, up_rate=None, win_rate=None, main_rune=None, slave_rune=None, tip=None):
         self.name = name
         self.up_rate = up_rate
         self.win_rate = win_rate
-        self.runes = runes
+        self.main_rune = main_rune
+        self.slave_rune = slave_rune
+        self.tip = tip
 
 
 def op_gg_api():
@@ -114,6 +113,7 @@ def get_hero_url():
 def get_op_gg():
     response = requests.get(url + endpoint, headers=headers)
     soup = bs4.BeautifulSoup(response.text, 'html.parser')
+    response.close()
     return soup
 
 
@@ -131,7 +131,7 @@ def get_hero(hero_url, heroes, hero_name) -> []:
     # 获取装备信息
     get_equipments(hero=hero, champion_text=champion_text)
     # 获取符文信息
-    get_runes(hero=hero, champion_main=champion_main, champion_text=champion_text)
+    get_runes(hero=hero, champion_main=champion_main)
 
     heroes.append(hero)
 
@@ -141,7 +141,7 @@ def getbody(body):
     soup = bs4.BeautifulSoup(response.text, 'html.parser')
     champion_main = soup.find('div', class_="l-champion-statistics-content__main")
     champion_text = champion_main.table
-
+    response.close()
     return champion_main, champion_text
 
 
@@ -216,24 +216,77 @@ def get_equipments(hero, champion_text):
     hero.equipment = equipments
 
 
-def get_runes(hero, champion_main, champion_text):
-    runes = []
-    runes_tbody = champion_text.find_next_siblings('div')[0].tbody
-    runes_tag = runes_tbody.tr.td.div
-    runes_div = runes_tag.div.find_next_siblings('div')
-    runes_div.append(runes_tag.div)
-    for rune_div in runes_div:
-        rune = Rune()
+def get_runes(hero, champion_main):
+    index = 0
+    # 获取符文名称
+    rune_names = []
+    rune_names_group = []
+    pattern = re.compile('perk-page__item--active">[\\s,\\S]+?</div>')
+    pattern1 = re.compile('<img alt="(.+?)"')
+    for i in re.findall(pattern, str(champion_main.contents)):
+        rune_names.append(re.findall(pattern1, i))
+        index = index + 1
+        if index == 6:
+            rune_names_group.append(rune_names)
+            rune_names = []
+            index = 0
+
+    # 获取符文Tip
+    rune_tips = []
+    rune_tips_group = []
+    pattern2 = re.compile('active tip"[\\s,\\S]+?</div>')
+    for i in re.findall(pattern2, str(champion_main.contents)):
+        for pattern_tip in tip_list:
+            tips = re.findall(pattern_tip, i)
+            if len(tips) != 0:
+                rune_tips.append(tips[0])
+        index = index + 1
+        if index == 3:
+            rune_tips_group.append(rune_tips)
+            rune_tips = []
+            index = 0
+
+    # 获取符文胜率
+    rune_rate = []
+    rune_rate_group = []
+    pattern3 = re.compile('<div class="champion-stats-summary-rune__name">[\\s,\\S]*?</a>')
+    pattern4 = re.compile(r'<div class="champion-stats-summary-rune__name">(.*?)</div>')
+    pattern5 = re.compile(r'<strong>(.*?)</strong>')
+    pattern6 = re.compile(r'<span>(\d.*?)</span>')
+    for i in re.findall(pattern3, str(champion_main.contents)):
         # 匹配符文名
-        pattern8 = re.compile(r'<div class="champion-stats-summary-rune__name">(.*?)</div>')
-        for i in re.findall(pattern8, str(rune_div.a)):
-            rune.name = i
-        pattern9 = re.compile(r'<strong>(.*?)</strong>')
-        rune.up_rate = re.findall(pattern9, str(rune_div.a))
-        pattern10 = re.compile(r'<span>(\d.*?)</span>')
-        rune.win_rate = re.findall(pattern10, str(rune_div.a))
+        rune_rate.append(re.findall(pattern4, str(i)))
+        # 胜率
+        rune_rate.append(re.findall(pattern5, str(i)))
+        # 上场率
+        rune_rate.append(re.findall(pattern6, str(i)))
+        index = index + 1
+        if index == 1:
+            rune_rate_group.append(rune_rate)
+            rune_rate = []
+            index = 0
+
+    runes = []
+    for i in range(0, 4, 1):
+        rune = Rune()
+        rune.main_rune, rune.slave_rune = get_rune_main_and_slave(rune_names_group[i])
+        rune.tip = rune_tips_group[i]
+        rune.name = rune_rate_group[i % 2][0]
+        rune.up_rate = rune_rate_group[i % 2][1]
+        rune.win_rate = rune_rate_group[i % 2][2]
         runes.append(rune)
     hero.rune = runes
+
+
+def get_rune_main_and_slave(rune_names_group):
+    main_rune = []
+    slave_rune = []
+    for i in range(0, len(rune_names_group), 1):
+        if i < 4:
+            main_rune.append(rune_names_group[i])
+        else:
+            slave_rune.append(rune_names_group[i])
+    return main_rune, slave_rune
 
 
 def get_tiers():
@@ -258,3 +311,6 @@ def get_tiers():
         tiers.append(tier)
     return tiers
 
+
+if __name__ == '__main__':
+    get_all_heroes()
