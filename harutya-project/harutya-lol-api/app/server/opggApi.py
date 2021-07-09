@@ -1,10 +1,7 @@
 __author__ = 'Harutya'
 __date__ = '2021/07/02'
 
-import json
 import re
-import threading
-import time
 
 import requests
 import bs4
@@ -13,19 +10,12 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400",
     "Accept-Language": "zh-CN,zh;q=0.9"
 }
+web_champion = {}
 item = {}
 url = 'http://www.op.gg'
 endpoint = '/champion/statistics'
-tip_list = {re.compile('Attack Speed'), re.compile('Adaptive Force'), re.compile('Magic Resist'), re.compile('Armor'), re.compile('Ability Haste'), re.compile('Health')}
-
-
-class Info:
-    def __init__(self, heroes=None, tiers=None, date=None):
-        if heroes is None:
-            heroes = {}
-        self.date = date
-        self.hero = heroes
-        self.tiers = tiers
+tip_list = {re.compile('Attack Speed'), re.compile('Adaptive Force'), re.compile('Magic Resist'), re.compile('Armor'),
+            re.compile('Ability Haste'), re.compile('Health')}
 
 
 class Tier:
@@ -51,7 +41,7 @@ class Skill:
         self.win_rate = win_rate
 
 
-class Equipment:
+class Equipments:
     def __init__(self, equipment=None, up_rate=None, win_rate=None):
         self.equipment = equipment
         self.up_rate = up_rate
@@ -68,33 +58,9 @@ class Rune:
         self.tip = tip
 
 
-def op_gg_api():
-    info = Info()
-    info.tiers = get_tiers()
-    info.date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    info.hero = get_all_heroes()
-    json_info = json.dumps(info, default=lambda o: o.__dict__, sort_keys=True, indent=4, ensure_ascii=False)
-    # print(json_info)
-    # a = json.loads(json_info)
-    return json_info
-
-
-def get_all_heroes():
-    heroes = []
-    threads = []
-    hero_urls = get_hero_url()
-    for key in hero_urls.keys():
-        threads.append(threading.Thread(target=get_hero, kwargs={"hero_url": hero_urls[key], "heroes": heroes, "hero_name": key}))
-        break
-    for t in threads:
-        t.setDaemon(True)
-        t.start()
-    for t in threads:
-        t.join()
-    return heroes
-
-
 def get_hero_url():
+    heroes = []
+    web_champion.clear()
     soup = get_op_gg()
     # 获取到英雄列表
     champion_lists = soup.find('div', class_='champion-index__champion-list')
@@ -102,12 +68,12 @@ def get_hero_url():
     pattern1 = re.compile('(<div class="champion-index__champion-item .*?</div>)')
     champion_list = re.findall(pattern1, str(champion_lists))
     # 将英雄名和网址作为一个字典
-    web_champion = {}
     for champion in champion_list:
         champion_soup = bs4.BeautifulSoup(champion, 'html.parser')
         if champion_soup.div is not None and champion_soup.div.a is not None:
+            heroes.append(champion_soup.div['data-champion-key'])
             web_champion[champion_soup.div['data-champion-key']] = url + champion_soup.div.a['href']
-    return web_champion
+    return heroes
 
 
 def get_op_gg():
@@ -117,8 +83,12 @@ def get_op_gg():
     return soup
 
 
-def get_hero(hero_url, heroes, hero_name) -> []:
-    print(hero_url)
+def get_hero(hero_name) -> []:
+    if len(web_champion) > 0:
+        hero_url = web_champion[hero_name]
+    else:
+        get_hero_url()
+        hero_url = web_champion[hero_name]
     # 对应英雄查询具体信息
     champion_main, champion_text = getbody(hero_url)
     hero = Hero()
@@ -132,8 +102,7 @@ def get_hero(hero_url, heroes, hero_name) -> []:
     get_equipments(hero=hero, champion_text=champion_text)
     # 获取符文信息
     get_runes(hero=hero, champion_main=champion_main)
-
-    heroes.append(hero)
+    return hero.__dict__
 
 
 def getbody(body):
@@ -171,7 +140,7 @@ def get_summoner_skills(hero, champion_main):
     skills = []
     for i in range(0, len(skill_name), 2):
         skill = Skill(name1=skill_name[i], name2=skill_name[i + 1], up_rate=skill_rate[i], win_rate=skill_rate[i + 1])
-        skills.append(skill)
+        skills.append(skill.__dict__)
     hero.summoner_skills = skills
 
 
@@ -194,7 +163,7 @@ def get_equipments(hero, champion_text):
     pattern6 = re.compile(r'(<tr[\s,\S]*?</tr>)')
     equipment_text = re.findall(pattern6, str(equipment_tbody))
     for text in equipment_text:
-        equipment = Equipment()
+        equipment = Equipments()
         # 获取装备名
         pattern6 = re.compile('(<li class="champion-stats__list__item tip"[\\s,\\S]*?</li>)')
         tmp_equipment = re.findall(pattern6, text)
@@ -212,7 +181,7 @@ def get_equipments(hero, champion_text):
         rates = re.findall(pattern7, text)
         equipment.up_rate = rates[0]
         equipment.win_rate = rates[1]
-        equipments.append(equipment)
+        equipments.append(equipment.__dict__)
     hero.equipment = equipments
 
 
@@ -274,7 +243,7 @@ def get_runes(hero, champion_main):
         rune.name = rune_rate_group[i % 2][0]
         rune.up_rate = rune_rate_group[i % 2][1]
         rune.win_rate = rune_rate_group[i % 2][2]
-        runes.append(rune)
+        runes.append(rune.__dict__)
     hero.rune = runes
 
 
@@ -308,9 +277,5 @@ def get_tiers():
                           str(rank[i]).replace("icon-", "").replace(".png", "")])
         tier.rank = ranks
         tier.position = position.replace("tabItem champion-trend-tier-", "")
-        tiers.append(tier)
+        tiers.append(tier.__dict__)
     return tiers
-
-
-if __name__ == '__main__':
-    get_all_heroes()
